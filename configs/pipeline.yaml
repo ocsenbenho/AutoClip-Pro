@@ -1,0 +1,16 @@
+# Pipeline configuration
+whisper:
+  model: "base"   # tiny | base | small | medium | large
+
+openai:
+  model: "gpt-4o-mini"
+
+clips:
+  min_duration: 15.0   # seconds
+  max_duration: 90.0   # seconds
+  max_count: 10
+
+output:
+  video_dir: "data/videos"
+  clip_dir: "data/clips"
+  subtitle_dir: "data/subtitles"

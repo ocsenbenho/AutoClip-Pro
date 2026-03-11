@@ -42,11 +42,21 @@ INTEREST_KEYWORDS = {
     "absolutely", "definitely", "exactly", "obviously", "clearly",
 }
 
+# Strong hook words that should appear at the very beginning of a clip
+HOOK_KEYWORDS = {
+    "why", "how", "what", "secret", "truth", "never", "always",
+    "look", "listen", "stop", "wait", "imagine", "picture",
+    "reason", "mistake", "hack", "trick", "tip", "tại sao",
+    "sự thật", "bí mật", "đừng", "hãy", "nghe này", "tin được không",
+    "dừng lại", "cách để", "lý do"
+}
+
 # Weight multipliers for different scoring factors
-KEYWORD_WEIGHT = 0.35
-PACE_WEIGHT = 0.20
+KEYWORD_WEIGHT = 0.25
+HOOK_WEIGHT = 0.20
+PACE_WEIGHT = 0.15
 ENERGY_WEIGHT = 0.25
-DENSITY_WEIGHT = 0.20
+DENSITY_WEIGHT = 0.15
 
 
 class LocalHighlightDetector(HighlightDetector):
@@ -58,19 +68,19 @@ class LocalHighlightDetector(HighlightDetector):
 
     def __init__(
         self,
-        window_seconds: float = 45.0,
+        window_seconds_list: list[float] = None,
         step_seconds: float = 15.0,
         min_score: float = 0.3,
         max_highlights: int = 0,
     ) -> None:
-        self._window = window_seconds
+        self._windows = window_seconds_list or [30.0, 45.0, 60.0]
         self._step = step_seconds
         self._min_score = min_score
         # 0 means "use settings.max_clips"
         self._max_highlights = max_highlights or settings.max_clips
 
     def detect(self, transcript: Transcript) -> List[Highlight]:
-        """Detect highlights by sliding a window over the transcript.
+        """Detect highlights by sliding multiple windows over the transcript.
 
         Args:
             transcript: Full video transcript.
@@ -103,64 +113,104 @@ class LocalHighlightDetector(HighlightDetector):
                             end=w["end"],
                             score=round(score, 3),
                             title=self._generate_title(w["text"], w["start"]),
-                            reason=f"Score: keyword={w['keyword_score']:.2f}, "
-                                   f"energy={w['energy_score']:.2f}, "
-                                   f"pace={w['pace_score']:.2f}",
+                            reason=f"Score: hook={w['hook_score']:.2f}, "
+                                   f"keyword={w['keyword_score']:.2f}, "
+                                   f"energy={w['energy_score']:.2f}",
                         )
                     )
 
-            # Sort by score descending, take top N
+            # Sort by score descending, then remove overlaps
             highlights.sort(key=lambda h: h.score, reverse=True)
+            highlights = self._remove_overlaps(highlights)
             highlights = highlights[: self._max_highlights]
 
             logger.info("Found %d highlights from %d windows", len(highlights), len(windows))
             return highlights
 
+    def _remove_overlaps(self, highlights: list[Highlight]) -> list[Highlight]:
+        """Remove overlapping highlights, keeping the higher-scored one."""
+        kept: list[Highlight] = []
+        for h in highlights:
+            overlaps = any(
+                h.start < existing.end and h.end > existing.start
+                for existing in kept
+            )
+            if not overlaps:
+                kept.append(h)
+        return kept
+
     def _generate_windows(self, transcript: Transcript, total_duration: float) -> list:
-        """Slide a window across the transcript and score each window."""
-        windows = []
-        t = 0.0
+        """Slide multiple windows across the transcript and score each window."""
+        all_windows = []
+        
+        for window_size in self._windows:
+            t = 0.0
+            while t + window_size <= total_duration:
+                window_start = t
+                window_end = t + window_size
 
-        while t + self._window <= total_duration:
-            window_start = t
-            window_end = t + self._window
+                # Get segments in this window
+                segs = [
+                    s for s in transcript.segments
+                    if s.end > window_start and s.start < window_end
+                ]
 
-            # Get segments in this window
-            segs = [
-                s for s in transcript.segments
-                if s.end > window_start and s.start < window_end
-            ]
+                if segs:
+                    text = " ".join(s.text for s in segs)
+                    words = text.lower().split()
+                    word_count = len(words)
 
-            if segs:
-                text = " ".join(s.text for s in segs)
-                words = text.lower().split()
-                word_count = len(words)
+                    hook_score = self._score_hook(text)
+                    keyword_score = self._score_keywords(words)
+                    energy_score = self._score_energy(text)
+                    pace_score = self._score_pace(word_count, window_size)
+                    density_score = self._score_density(segs, window_size)
 
-                keyword_score = self._score_keywords(words)
-                energy_score = self._score_energy(text)
-                pace_score = self._score_pace(word_count, self._window)
-                density_score = self._score_density(segs, self._window)
+                    raw_score = (
+                        HOOK_WEIGHT * hook_score
+                        + KEYWORD_WEIGHT * keyword_score
+                        + ENERGY_WEIGHT * energy_score
+                        + PACE_WEIGHT * pace_score
+                        + DENSITY_WEIGHT * density_score
+                    )
 
-                raw_score = (
-                    KEYWORD_WEIGHT * keyword_score
-                    + ENERGY_WEIGHT * energy_score
-                    + PACE_WEIGHT * pace_score
-                    + DENSITY_WEIGHT * density_score
-                )
+                    all_windows.append({
+                        "start": window_start,
+                        "end": window_end,
+                        "text": text,
+                        "raw_score": raw_score,
+                        "hook_score": hook_score,
+                        "keyword_score": keyword_score,
+                        "energy_score": energy_score,
+                        "pace_score": pace_score,
+                    })
 
-                windows.append({
-                    "start": window_start,
-                    "end": window_end,
-                    "text": text,
-                    "raw_score": raw_score,
-                    "keyword_score": keyword_score,
-                    "energy_score": energy_score,
-                    "pace_score": pace_score,
-                })
+                t += self._step
 
-            t += self._step
+        return all_windows
 
-        return windows
+    @staticmethod
+    def _score_hook(text: str) -> float:
+        """Score based on strong viral hooks in the first 10 words."""
+        sentences = re.split(r"[.!?]+", text)
+        if not sentences:
+            return 0.0
+            
+        first_sentence = sentences[0].lower().strip()
+        first_words = first_sentence.split()[:10]
+        
+        score = 0.0
+        # If it starts with a question word or hook phrase
+        for hook in HOOK_KEYWORDS:
+            if hook in " ".join(first_words):
+                score += 0.5
+                break # Cap hook bonus at 0.5
+                
+        # Bonus if the first sentence is a question
+        if "?" in sentences[0]:
+            score += 0.5
+            
+        return min(score, 1.0)
 
     @staticmethod
     def _score_keywords(words: list) -> float:

@@ -41,20 +41,24 @@ class ClipService:
                 clip_id = uuid.uuid4().hex[:12]
                 output_path = str(settings.clip_dir / f"{clip_id}.mp4")
 
+                # Add 0.5s padding to prevent audio cutting off abruptly
+                start_padded = max(0.0, highlight.start - 0.5)
+                end_padded = highlight.end + 0.5
+
                 logger.info(
                     "Cutting clip %d/%d: %s (%.1fs-%.1fs)",
-                    idx, len(highlights), highlight.title, highlight.start, highlight.end,
+                    idx, len(highlights), highlight.title, start_padded, end_padded,
                 )
 
-                self._editor.cut(video_path, highlight.start, highlight.end, output_path)
+                self._editor.cut(video_path, start_padded, end_padded, output_path)
 
                 clip = Clip(
                     id=clip_id,
                     source_video_id=video_id,
                     title=highlight.title,
-                    start=highlight.start,
-                    end=highlight.end,
-                    duration=highlight.end - highlight.start,
+                    start=start_padded,
+                    end=end_padded,
+                    duration=end_padded - start_padded,
                     file_path=output_path,
                     score=highlight.score,
                     reason=highlight.reason,

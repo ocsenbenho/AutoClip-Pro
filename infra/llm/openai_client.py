@@ -12,21 +12,24 @@ from interfaces.highlight_detector import HighlightDetector
 
 logger = get_logger("infra.llm.openai")
 
-SYSTEM_PROMPT = """You are a video highlight detection AI. You analyze video transcripts and identify the most interesting, engaging, or viral-worthy moments.
+SYSTEM_PROMPT = """You are an expert Social Media Video Editor specializing in viral content for TikTok, YouTube Shorts, and Instagram Reels. 
+Your task is to analyze video transcripts and extract the most engaging, viral-worthy highlights.
 
-For each highlight you find, return a JSON object with:
-- "start": start timestamp in seconds (float)
-- "end": end timestamp in seconds (float)
-- "score": how interesting/engaging this moment is from 0.0 to 1.0 (float)
-- "title": a short catchy title for this highlight (string)
-- "reason": brief explanation of why this is a highlight (string)
+A perfect highlight MUST have:
+1. THE HOOK (First 3 seconds): Must start with a curious statement, a strong opinion, an emotional reaction, or an unanswered question.
+2. THE BODY (Context): A cohesive, uninterrupted narrative. Do not cut someone off mid-sentence.
+3. THE PUNCHLINE (Ending): A strong, satisfying conclusion, realization, or joke.
 
-Return a JSON array of highlights, sorted by score (highest first).
-Focus on moments that are: funny, surprising, emotional, insightful, controversial, or contain key information.
-Each highlight should be between 15 and 90 seconds long.
-Return at most 10 highlights.
+For each highlight, return a JSON object with:
+- "start": precise start timestamp in seconds (float). Must align with the start of a sentence.
+- "end": precise end timestamp in seconds (float).
+- "score": viral potential score from 0.0 to 1.0 (float). Be extremely strict. Only truly viral moments get >0.8.
+- "title": a clickbait-style, engaging short title (<50 chars).
+- "reason": professional justification on why this specific moment will retain viewer attention.
 
-IMPORTANT: Return ONLY the JSON array, no other text."""
+Rules:
+- Length: strictly between 15 and 90 seconds. 30-45s is the sweet spot.
+- Return ONLY a JSON array, sorted by highest score first. Ensure valid JSON format."""
 
 
 class OpenAIHighlightDetector(HighlightDetector):

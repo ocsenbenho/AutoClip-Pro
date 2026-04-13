@@ -25,6 +25,22 @@ from services.video_ingest_service import VideoIngestService
 
 logger = get_logger("pipelines.clip")
 
+# ── Whisper singleton ─────────────────────────────────────────────
+# Model được khởi tạo MỘT LẦN duy nhất khi module được import và
+# giữ "warm" trong suốt vòng đời ứng dụng.
+# → Mỗi job tiếp theo bỏ qua 5-15s tải model, dùng thẳng instance này.
+# → MPS/CUDA device cũng được giữ nguyên, không phải chuyển lại.
+_whisper_engine: WhisperEngine | None = None
+
+
+def _get_whisper_engine() -> WhisperEngine:
+    """Trả về WhisperEngine singleton, khởi tạo nếu chưa có."""
+    global _whisper_engine
+    if _whisper_engine is None:
+        logger.info("Initializing WhisperEngine singleton (model=%s)", settings.whisper_model)
+        _whisper_engine = WhisperEngine(model_name=settings.whisper_model)
+    return _whisper_engine
+
 # Supported detector types
 DETECTOR_LOCAL = "local"
 DETECTOR_OPENAI = "openai"
@@ -115,7 +131,8 @@ def run_clip_pipeline(
         try:
             # ── Wire up infrastructure ────────────────────────────
             downloader = YtdlpDownloader()
-            whisper = WhisperEngine(model_name=settings.whisper_model)
+            # Dùng singleton đã warm – tránh tải lại model mỗi job.
+            whisper = _get_whisper_engine()
             ffmpeg = FfmpegEditor()
             srt_gen = SrtGenerator()
             highlight_detector = _create_detector(detector_type)
@@ -128,13 +145,28 @@ def run_clip_pipeline(
             subtitle_svc = SubtitleService(srt_gen)
 
             # ── Step 1: Download video ────────────────────────────
-            update_status(JobStatus.DOWNLOADING, "Downloading video...")
-            video = ingest_svc.ingest(job.video_url)
-            job.video = video
+            if job.video_url == "local_upload" and job.video is not None:
+                update_status(JobStatus.DOWNLOADING, "Using uploaded video...")
+                video = job.video
+            else:
+                update_status(JobStatus.DOWNLOADING, "Downloading video...")
+                video = ingest_svc.ingest(job.video_url)
+                job.video = video
 
             # ── Step 2: Transcribe audio ──────────────────────────
             update_status(JobStatus.TRANSCRIBING, "Transcribing audio...")
-            transcript = transcript_svc.transcribe_video(video.file_path)
+            transcript = transcript_svc.transcribe_video(video.file_path, language=job.video_language)
+
+            # Save full transcript
+            full_text = " ".join(seg.text.strip() for seg in transcript.segments)
+            transcript_filename = f"{job.id}_transcript.txt"
+            transcript_path = settings.subtitle_dir / transcript_filename
+            transcript_path.write_text(full_text, encoding="utf-8")
+            job.transcript_url = f"/subtitles/{transcript_filename}"
+
+            if job.task_type == "transcribe":
+                update_status(JobStatus.COMPLETED, "Transcription complete")
+                return job
 
             # ── Step 3: Detect highlights ─────────────────────────
             detector_label = AVAILABLE_DETECTORS.get(detector_type, detector_type)

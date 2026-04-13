@@ -1,6 +1,9 @@
 # Pipeline configuration
 whisper:
-  model: "base"   # tiny | base | small | medium | large
+  # Model size: tiny | base | small | medium | large-v3
+  # → "medium" cho chất lượng tốt, tiếng Việt chính xác (~769 MB RAM)
+  # → "large-v3" cho chất lượng cao nhất (~1.5 GB RAM)
+  model: "medium"
 
 openai:
   model: "gpt-4o-mini"

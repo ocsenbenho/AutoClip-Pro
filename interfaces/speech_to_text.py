@@ -9,11 +9,12 @@ class SpeechToText(ABC):
     """Abstract base class for speech-to-text engines."""
 
     @abstractmethod
-    def transcribe(self, audio_path: str) -> Transcript:
+    def transcribe(self, audio_path: str, language: str = "auto") -> Transcript:
         """Transcribe an audio file into a timestamped transcript.
 
         Args:
             audio_path: Path to the audio file.
+            language: The language to transcribe in, or "auto" to detect.
 
         Returns:
             Transcript containing timestamped segments.

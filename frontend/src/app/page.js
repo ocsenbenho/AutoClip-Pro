@@ -12,6 +12,10 @@ export default function HomePage() {
     const [detectors, setDetectors] = useState([]);
     const [selectedDetector, setSelectedDetector] = useState("local");
     const [verticalFormat, setVerticalFormat] = useState(false);
+    const [uploadMode, setUploadMode] = useState(false);
+    const [selectedFile, setSelectedFile] = useState(null);
+    const [taskType, setTaskType] = useState("clip");
+    const [videoLanguage, setVideoLanguage] = useState("auto");
 
     // Fetch recent jobs and detectors on mount
     useEffect(() => {
@@ -47,21 +51,41 @@ export default function HomePage() {
 
     async function handleSubmit(e) {
         e.preventDefault();
-        if (!url.trim()) return;
+        
+        if (uploadMode && !selectedFile) return;
+        if (!uploadMode && !url.trim()) return;
 
         setLoading(true);
         setMessage(null);
 
         try {
-            const res = await fetch(`${API_BASE}/jobs`, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({
-                    video_url: url.trim(),
-                    detector: selectedDetector,
-                    vertical_format: verticalFormat
-                }),
-            });
+            let res;
+            if (uploadMode) {
+                const formData = new FormData();
+                formData.append("file", selectedFile);
+                formData.append("detector", selectedDetector);
+                // HTML forms will send the string "true" or "false" but python FastAPI Form(bool) handles that
+                formData.append("vertical_format", verticalFormat);
+                formData.append("task_type", taskType);
+                formData.append("video_language", videoLanguage);
+                
+                res = await fetch(`${API_BASE}/jobs/upload`, {
+                    method: "POST",
+                    body: formData,
+                });
+            } else {
+                res = await fetch(`${API_BASE}/jobs`, {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({
+                        video_url: url.trim(),
+                        detector: selectedDetector,
+                        vertical_format: verticalFormat,
+                        task_type: taskType,
+                        video_language: videoLanguage
+                    }),
+                });
+            }
 
             if (res.ok) {
                 const job = await res.json();
@@ -70,6 +94,7 @@ export default function HomePage() {
                     text: `Job created! ID: ${job.id}`,
                 });
                 setUrl("");
+                setSelectedFile(null);
                 fetchJobs();
             } else {
                 const err = await res.json();
@@ -136,6 +161,56 @@ export default function HomePage() {
                     transcription, highlight detection, and subtitle generation.
                 </p>
 
+                <div style={{ display: "flex", justifyContent: "center", gap: 12, marginBottom: 20 }}>
+                    <button 
+                        type="button"
+                        className="btn-glow"
+                        style={{ 
+                            background: taskType === 'clip' ? 'var(--accent)' : 'rgba(255,255,255,0.05)',
+                            border: taskType === 'clip' ? '1px solid var(--accent-light)' : '1px solid rgba(255,255,255,0.1)',
+                        }}
+                        onClick={() => setTaskType("clip")}
+                    >
+                        ✂️ Create Clips
+                    </button>
+                    <button 
+                        type="button"
+                        className="btn-glow"
+                        style={{ 
+                            background: taskType === 'transcribe' ? 'var(--accent)' : 'rgba(255,255,255,0.05)',
+                            border: taskType === 'transcribe' ? '1px solid var(--accent-light)' : '1px solid rgba(255,255,255,0.1)',
+                        }}
+                        onClick={() => setTaskType("transcribe")}
+                    >
+                        📄 Transcribe Only
+                    </button>
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "center", gap: 12, marginBottom: 20 }}>
+                    <button 
+                        type="button"
+                        className="btn-glow"
+                        style={{ 
+                            background: !uploadMode ? 'var(--accent)' : 'rgba(255,255,255,0.05)',
+                            border: !uploadMode ? '1px solid var(--accent-light)' : '1px solid rgba(255,255,255,0.1)',
+                        }}
+                        onClick={() => setUploadMode(false)}
+                    >
+                        🔗 Paste URL
+                    </button>
+                    <button 
+                        type="button"
+                        className="btn-glow"
+                        style={{ 
+                            background: uploadMode ? 'var(--accent)' : 'rgba(255,255,255,0.05)',
+                            border: uploadMode ? '1px solid var(--accent-light)' : '1px solid rgba(255,255,255,0.1)',
+                        }}
+                        onClick={() => setUploadMode(true)}
+                    >
+                        📁 Upload Video
+                    </button>
+                </div>
+
                 {/* ── URL Input Form ─────────────────────────── */}
                 <form
                     onSubmit={handleSubmit}
@@ -150,66 +225,96 @@ export default function HomePage() {
                     }}
                 >
                     <div style={{ display: "flex", width: "100%", gap: 12 }}>
-                        <input
-                            type="text"
-                            className="input-dark"
-                            placeholder="Paste YouTube URL here..."
-                            value={url}
-                            onChange={(e) => setUrl(e.target.value)}
-                            disabled={loading}
-                            style={{ flex: 1 }}
-                        />
+                        {uploadMode ? (
+                            <input
+                                key="upload-input"
+                                type="file"
+                                accept="video/*"
+                                className="input-dark"
+                                onChange={(e) => setSelectedFile(e.target.files[0])}
+                                disabled={loading}
+                                style={{ flex: 1, padding: "10px" }}
+                            />
+                        ) : (
+                            <input
+                                key="url-input"
+                                type="text"
+                                className="input-dark"
+                                placeholder="Paste YouTube URL here..."
+                                value={url}
+                                onChange={(e) => setUrl(e.target.value)}
+                                disabled={loading}
+                                style={{ flex: 1 }}
+                            />
+                        )}
                         <select
                             className="input-dark"
-                            value={selectedDetector}
-                            onChange={(e) => setSelectedDetector(e.target.value)}
-                            disabled={loading || detectors.length === 0}
-                            style={{ width: 220, cursor: "pointer", appearance: "auto" }}
+                            value={videoLanguage}
+                            onChange={(e) => setVideoLanguage(e.target.value)}
+                            disabled={loading}
+                            style={{ width: 140, cursor: "pointer", appearance: "auto" }}
                         >
-                            {detectors.length === 0 ? (
-                                <option value="local">Local Analysis (Free)</option>
-                            ) : (
-                                detectors.map((d) => (
-                                    <option key={d.id} value={d.id}>
-                                        {d.name.split(" ")[0]} {d.name.includes("Free") ? "(Free)" : "(API Key)"}
-                                    </option>
-                                ))
-                            )}
+                            <option value="auto">Auto-Detect</option>
+                            <option value="vi">Vietnamese</option>
+                            <option value="en">English</option>
                         </select>
+                        {taskType === "clip" && (
+                            <select
+                                className="input-dark"
+                                value={selectedDetector}
+                                onChange={(e) => setSelectedDetector(e.target.value)}
+                                disabled={loading || detectors.length === 0}
+                                style={{ width: 220, cursor: "pointer", appearance: "auto" }}
+                            >
+                                {detectors.length === 0 ? (
+                                    <option value="local">Local Analysis (Free)</option>
+                                ) : (
+                                    detectors.map((d) => (
+                                        <option key={d.id} value={d.id}>
+                                            {d.name.split(" ")[0]} {d.name.includes("Free") ? "(Free)" : "(API Key)"}
+                                        </option>
+                                    ))
+                                )}
+                            </select>
+                        )}
                     </div>
                     <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                        <label
-                            style={{
-                                display: "flex",
-                                alignItems: "center",
-                                gap: 8,
-                                color: "var(--text-secondary)",
-                                fontSize: 14,
-                                cursor: "pointer",
-                                userSelect: "none",
-                            }}
-                        >
-                            <input
-                                type="checkbox"
-                                checked={verticalFormat}
-                                onChange={(e) => setVerticalFormat(e.target.checked)}
-                                disabled={loading}
-                                style={{
-                                    accentColor: "var(--accent)",
-                                    width: 16,
-                                    height: 16,
-                                    cursor: "pointer",
-                                }}
-                            />
-                            📱 Vertical Format (9:16)
-                        </label>
+                        <div style={{flex: 1}}>
+                            {taskType === "clip" && (
+                                <label
+                                    style={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: 8,
+                                        color: "var(--text-secondary)",
+                                        fontSize: 14,
+                                        cursor: "pointer",
+                                        userSelect: "none",
+                                    }}
+                                >
+                                    <input
+                                        type="checkbox"
+                                        checked={verticalFormat}
+                                        onChange={(e) => setVerticalFormat(e.target.checked)}
+                                        disabled={loading}
+                                        style={{
+                                            accentColor: "var(--accent)",
+                                            width: 16,
+                                            height: 16,
+                                            cursor: "pointer",
+                                        }}
+                                    />
+                                    📱 Vertical Format (9:16)
+                                </label>
+                            )}
+                        </div>
                         <button
                             type="submit"
                             className="btn-glow"
-                            disabled={loading || !url.trim()}
+                            disabled={loading || (uploadMode ? !selectedFile : !url.trim())}
                             style={{ whiteSpace: "nowrap", minWidth: 140 }}
                         >
-                            {loading ? "Submitting..." : "⚡ Generate Clips"}
+                            {loading ? "Submitting..." : taskType === "clip" ? "⚡ Generate Clips" : "📄 Get Transcript"}
                         </button>
                     </div>
                 </form>

@@ -16,7 +16,7 @@ class Settings(BaseSettings):
     subtitle_dir: Path = Path(__file__).resolve().parent.parent.parent / "data" / "subtitles"
 
     # ── Whisper ────────────────────────────────────────────────────
-    whisper_model: str = "base"
+    whisper_model: str = "medium"
 
     # ── OpenAI / Gemini / LLM ────────────────────────────────────
     openai_api_key: str = ""

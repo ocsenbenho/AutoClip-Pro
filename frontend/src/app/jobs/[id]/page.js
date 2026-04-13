@@ -347,6 +347,25 @@ export default function JobDetailPage({ params }) {
                 )}
             </div>
 
+            {/* ── Full Transcript ────────────────────────────── */}
+            {job.transcript_url && (
+                <div style={{ marginBottom: 32 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                        <h2 style={{ fontSize: 22, fontWeight: 700 }}>Full Text Transcript</h2>
+                        <a
+                            href={`http://localhost:8000${job.transcript_url}`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="btn-glow"
+                            download
+                            style={{ textDecoration: "none", fontSize: 13, padding: "8px 16px" }}
+                        >
+                            📄 Download File
+                        </a>
+                    </div>
+                </div>
+            )}
+
             {/* ── Clips Grid ───────────────────────────────── */}
             {job.clips && job.clips.length > 0 && (
                 <div>

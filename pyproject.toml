@@ -1,6 +1,6 @@
 [project]
 name = "autoclip-pro"
-version = "0.1.0"
+version = "0.2.0"
 description = "Automated video highlight clip generator"
 requires-python = ">=3.11"
 dependencies = [

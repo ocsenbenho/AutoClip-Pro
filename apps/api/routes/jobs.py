@@ -1,16 +1,21 @@
 """Job management API routes."""
 
+import os
+import shutil
 import uuid
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form
 from pydantic import BaseModel
 
+from core.config import settings
 from core.logging import get_logger
 from core.models.job import Job, JobStatus
+from core.models.video import VideoMetadata
 from pipelines.clip_pipeline import run_clip_pipeline, AVAILABLE_DETECTORS, DETECTOR_LOCAL
+from infra.video.ffmpeg_editor import FfmpegEditor
 
 logger = get_logger("apps.api.jobs")
 router = APIRouter(tags=["jobs"])
@@ -19,7 +24,9 @@ router = APIRouter(tags=["jobs"])
 _jobs: dict[str, Job] = {}
 _job_detectors: dict[str, str] = {}  # job_id → detector type
 _job_vertical_formats: dict[str, bool] = {}  # job_id → vertical format choice
-_executor = ThreadPoolExecutor(max_workers=2)
+# max_workers=4: cho ph\u00e9p x\u1eed l\u00fd \u0111\u1ed3ng th\u1eddi nhi\u1ec1u job h\u01a1n.
+# Whisper singleton warm s\u1eb5n tr\u00ean MPS \u2192 CPU contention th\u1ea5p \u2192 an to\u00e0n t\u0103ng workers.
+_executor = ThreadPoolExecutor(max_workers=4)
 
 
 # ── Request / Response schemas ────────────────────────────────────
@@ -27,6 +34,8 @@ class CreateJobRequest(BaseModel):
     video_url: str
     detector: str = DETECTOR_LOCAL
     vertical_format: bool = False
+    task_type: str = "clip"
+    video_language: str = "auto"
 
 
 class JobResponse(BaseModel):
@@ -42,6 +51,9 @@ class JobResponse(BaseModel):
     progress_message: Optional[str] = None
     detector: Optional[str] = None
     vertical_format: bool = False
+    transcript_url: Optional[str] = None
+    task_type: str = "clip"
+    video_language: str = "auto"
 
 class JobDetailResponse(JobResponse):
     clips: List[dict] = []
@@ -62,6 +74,9 @@ def _job_to_response(job: Job) -> JobResponse:
         progress_message=job.progress_message,
         detector=_job_detectors.get(job.id),
         vertical_format=_job_vertical_formats.get(job.id, False),
+        transcript_url=job.transcript_url,
+        task_type=job.task_type,
+        video_language=job.video_language,
     )
 
 
@@ -122,7 +137,7 @@ def create_job(req: CreateJobRequest):
         )
 
     job_id = uuid.uuid4().hex[:12]
-    job = Job(id=job_id, video_url=req.video_url)
+    job = Job(id=job_id, video_url=req.video_url, task_type=req.task_type, video_language=req.video_language)
     
     _jobs[job_id] = job
     # Store choices for response
@@ -136,6 +151,69 @@ def create_job(req: CreateJobRequest):
 
     # Run pipeline in background
     _executor.submit(_run_pipeline, job_id, req.detector, req.vertical_format)
+
+    return _job_to_response(job)
+
+
+@router.post("/jobs/upload", response_model=JobResponse, status_code=201)
+def upload_job(
+    file: UploadFile = File(...),
+    detector: str = Form(DETECTOR_LOCAL),
+    vertical_format: bool = Form(False),
+    task_type: str = Form("clip"),
+    video_language: str = Form("auto")
+):
+    """Submit a new video processing job from a file upload."""
+    if detector not in AVAILABLE_DETECTORS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid detector '{detector}'. Available: {list(AVAILABLE_DETECTORS.keys())}",
+        )
+
+    job_id = uuid.uuid4().hex[:12]
+    
+    # Save the file
+    settings.ensure_dirs()
+    safe_filename = file.filename.replace(" ", "_")
+    file_path = settings.video_dir / f"{job_id}_{safe_filename}"
+    
+    with open(file_path, "wb") as buffer:
+        shutil.copyfileobj(file.file, buffer)
+
+    # Get metadata using FfmpegEditor
+    ffmpeg = FfmpegEditor()
+    duration = 0.0
+    try:
+        info = ffmpeg.get_info(str(file_path))
+        duration = info.get("duration", 0.0)
+    except Exception as e:
+        logger.warning(f"Could not get duration for uploaded file: {e}")
+
+    job = Job(
+        id=job_id, 
+        video_url="local_upload",
+        task_type=task_type,
+        video_language=video_language,
+        video=VideoMetadata(
+            id=job_id,
+            title=file.filename,
+            url="local_upload",
+            file_path=str(file_path),
+            duration=duration
+        )
+    )
+    
+    _jobs[job_id] = job
+    _job_detectors[job_id] = detector
+    _job_vertical_formats[job_id] = vertical_format
+
+    logger.info(
+        "Created job %s for uploaded file: %s (detector: %s, vertical: %s)",
+        job_id, file.filename, detector, vertical_format
+    )
+
+    # Run pipeline in background
+    _executor.submit(_run_pipeline, job_id, detector, vertical_format)
 
     return _job_to_response(job)
 

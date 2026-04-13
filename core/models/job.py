@@ -35,3 +35,6 @@ class Job(BaseModel):
     clips: List[Clip] = Field(default_factory=list)
     error: Optional[str] = None
     progress_message: Optional[str] = None
+    transcript_url: Optional[str] = None
+    task_type: str = "clip"
+    video_language: str = "auto"

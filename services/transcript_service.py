@@ -19,11 +19,12 @@ class TranscriptService:
         self._stt = stt_engine
         self._editor = video_editor
 
-    def transcribe_video(self, video_path: str) -> Transcript:
+    def transcribe_video(self, video_path: str, language: str = "auto") -> Transcript:
         """Extract audio from a video and produce a timestamped transcript.
 
         Args:
             video_path: Path to the video file.
+            language: The language to transcribe in, or "auto" to detect.
 
         Returns:
             Transcript with timestamped segments.
@@ -41,7 +42,7 @@ class TranscriptService:
 
             try:
                 self._editor.extract_audio(video_path, audio_path)
-                transcript = self._stt.transcribe(audio_path)
+                transcript = self._stt.transcribe(audio_path, language=language)
                 logger.info(
                     "Transcription complete: %d segments, language=%s",
                     len(transcript.segments),

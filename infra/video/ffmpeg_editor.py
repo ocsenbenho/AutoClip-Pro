@@ -122,7 +122,10 @@ class FfmpegEditor(VideoEditor):
                 raise ClipError(f"Audio extraction error: {exc}") from exc
 
     def format_vertical(self, video_path: str, output_path: str) -> str:
-        """Crop a landscape video to a 9:16 vertical aspect ratio.
+        """Crop a landscape video to a 9:16 vertical aspect ratio dynamically.
+
+        Uses the AutoReframe module to track faces and pan smoothly instead
+        of a static center crop.
 
         Args:
             video_path: Path to the source video.
@@ -132,32 +135,52 @@ class FfmpegEditor(VideoEditor):
             Path to the vertical clip.
 
         Raises:
-            ClipError: If FFmpeg fails.
+            ClipError: If processing fails.
         """
-        with log_operation(logger, f"Formatting {video_path} to vertical 9:16"):
+        from infra.video.auto_reframe import AutoReframe
+        
+        reframe = AutoReframe(target_aspect_ratio=9/16)
+        return reframe.process(video_path, output_path)
+
+    def get_info(self, video_path: str) -> dict:
+        """Get video metadata using ffprobe.
+        
+        Args:
+            video_path: Path to the video file.
+            
+        Returns:
+            Dictionary containing 'duration' and other metadata.
+            
+        Raises:
+            ClipError: If ffprobe fails.
+        """
+        import json
+        with log_operation(logger, f"Getting info for {video_path}"):
             cmd = [
-                "ffmpeg",
-                "-y",
-                "-i", video_path,
-                "-vf", "crop=ih*(9/16):ih",
-                "-c:v", "libx264",
-                "-preset", "fast",
-                "-c:a", "copy",
-                output_path,
+                "ffprobe",
+                "-v", "quiet",
+                "-print_format", "json",
+                "-show_format",
+                "-show_streams",
+                video_path
             ]
             try:
                 result = subprocess.run(
                     cmd,
                     capture_output=True,
                     text=True,
-                    timeout=300,
+                    timeout=30,
                 )
                 if result.returncode != 0:
-                    raise ClipError(f"Vertical formatting failed: {result.stderr}")
-                return output_path
-            except subprocess.TimeoutExpired as exc:
-                raise ClipError(f"FFmpeg vertical formatting timed out: {exc}") from exc
-            except FileNotFoundError:
-                raise ClipError("FFmpeg not found. Please install FFmpeg: brew install ffmpeg")
+                    raise ClipError(f"ffprobe failed: {result.stderr}")
+                
+                data = json.loads(result.stdout)
+                format_info = data.get("format", {})
+                duration = float(format_info.get("duration", 0.0))
+                return {
+                    "duration": duration,
+                    "format_name": format_info.get("format_name"),
+                    "tags": format_info.get("tags", {})
+                }
             except Exception as exc:
-                raise ClipError(f"Vertical formatting error: {exc}") from exc
+                raise ClipError(f"ffprobe error: {exc}") from exc
